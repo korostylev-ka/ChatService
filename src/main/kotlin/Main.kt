@@ -1,23 +1,27 @@
 //класс исключений при отсутствии чата
 class ChatsNotFoundException(message: String): RuntimeException(message)
+//класс исключений при отсутствии пользователя
+class UserNotFoundException(message: String): RuntimeException(message)
 
 //класс чата двух различных пользователей, хешкод объекта которого будет ключем в Мапе
 data class Chats(
     val idFirstUser: Long,
     val idSecondUser: Long
 ) {
-    //переопределяем хешкод
+    //переопределяем хешкод(чтоб был одинаков для двух одинаковых пользователей, независимо от порядка их указания)
     override fun hashCode(): Int {
-        if (idFirstUser < idSecondUser) return idFirstUser.hashCode()*idSecondUser.hashCode()*(idFirstUser.hashCode() + 111) else return idSecondUser.hashCode()*idFirstUser.hashCode()*(idSecondUser.hashCode() + 111)
+        if (idFirstUser < idSecondUser) return idFirstUser.hashCode()*idSecondUser.hashCode()*(idFirstUser.hashCode() + 111)
+            else return idSecondUser.hashCode()*idFirstUser.hashCode()*(idSecondUser.hashCode() + 111)
     }
     //переопределяем функцию сравнения. Т.е. главное, чтобы id пользователей были одинаковые, независимо от порядка указания
     override fun equals(other: Any?): Boolean {
-        if (other is Chats) return ((other.idFirstUser === this.idFirstUser && other.idSecondUser === this.idSecondUser) || (other.idFirstUser === this.idSecondUser && other.idSecondUser === this.idFirstUser))
+        if (other is Chats) return ((other.idFirstUser === this.idFirstUser && other.idSecondUser === this.idSecondUser) ||
+                (other.idFirstUser === this.idSecondUser && other.idSecondUser === this.idFirstUser))
         return false
-
     }
 }
-//ддата класс сообщений
+
+//дата класс сообщений
 data class Message(
     val fromId: Long, //id автора
     val toId: Long, //id адресата
@@ -34,6 +38,20 @@ object ChatService{
     var chatList: MutableMap<Int, MutableList<Message>?> = mutableMapOf<Int, MutableList<Message>?>()
     //Мапа непрочитанных сообщений
     var unreadMessages: MutableMap<Int, MutableList<Int>?> = mutableMapOf<Int, MutableList<Int>?>()
+    //лямбда для проверки существования автора
+    val isAuthorExist = {id: Long, list: List<Message>? ->
+        val listFilter = list?.filter{it.fromId == id}
+        if (listFilter?.size == 0) false else true
+    }
+    //лямбда для проверки существования адресата
+    val isSenderExist = {id: Long, list: List<Message>? ->
+        val listFilter = list?.filter{it.toId == id}
+        if (listFilter?.size == 0) false else true
+    }
+    //лямюда для проверки существования id в списке адресатов или авторов
+    val isUserExist = {id: Long, list: List<Message>? ->
+        if ((isSenderExist(id, list) == true || isAuthorExist(id, list) == true)) true else false
+    }
 
     //функция отправки сообщения
     fun sendMsg(
@@ -67,6 +85,8 @@ object ChatService{
         idFirst: Long, //id первого пользователя
         idSecond: Long // id второго пользователя
     ): List<Message>? {
+        if (isUserExist(idFirst, messageList) == false) throw UserNotFoundException("Такого пользователя нет")
+        if (isUserExist(idSecond, messageList) == false) throw UserNotFoundException("Такого пользователя нет")
         println("Chat user $idFirst with user $idSecond: ")
         //фильтруем список сообщений по id пользователей
         val list = messageList?.filter { (it.fromId == idFirst || it.fromId == idSecond) && (it.toId == idFirst || it.toId == idSecond)}
@@ -97,7 +117,10 @@ object ChatService{
         } else throw ChatsNotFoundException("Нет такого чата")
     }
 
+    //получаем список пользователей, с которыми пользователь общается
     fun getChats(id: Long): Map<Long, List<Message>>? {
+        //проверяем наличие пользователя
+        if (isUserExist(id, messageList) == false) throw UserNotFoundException("Такого пользователя нет")
         //фильтруем список сообщений, где требуемый id указан в качестве автора или адресата
         val list = messageList?.filter { it.fromId == id || it.toId == id }
         //выкидываем исключение, если нет сообщений
@@ -109,39 +132,37 @@ object ChatService{
 
     }
 
-    fun getMessages(idUser: Long): Int {
-        if (unreadMessages.containsKey(idUser.toInt())) unreadMessages.remove(idUser.toInt())
-        return 1
+    //получаем список сообщений из чата
+    fun getMessages(idFirstUser: Long, idSecondUser: Long): Int {
+        //проверяем наличие пользователей
+        if (isUserExist(idFirstUser, messageList) == false) throw UserNotFoundException("Такого пользователя нет")
+        if (isUserExist(idSecondUser, messageList) == false) throw UserNotFoundException("Такого пользователя нет")
+        //лямбда для удаления элемента коллекции
+        val lambdaDelete = {id: Long, map: MutableMap<Int, MutableList<Int>?>  ->
+            if (map.containsKey(id.toInt())) map.remove(id.toInt())
+        }
+        lambdaDelete(idFirstUser, unreadMessages)
+        lambdaDelete(idSecondUser, unreadMessages)
+        val chat = Chats(idFirstUser, idSecondUser)
+        //Список сообщений пользователей
+        val list = chatList.get(chat.hashCode())
+        //находим последнее сообщение(с наибольшим id)
+        val maxId = list?.maxBy(Message::id)?.id
+        println("у пользователя $idFirstUser и пользователя $idSecondUser id чата: ${chat.hashCode()}")
+        println("у пользователей ${list?.size} сообщений")
+        println("у последнего сообщения id: $maxId")
+        return 0
+    }
+
+    //очистка данных для автотестов
+    fun eraseAll(): Unit{
+        originalMsgId = 0
+        chatList.clear()
+        messageList.clear()
+        unreadMessages.clear()
     }
 }
 fun main() {
-    ChatService.sendMsg(1,2,"Привет")
-    ChatService.sendMsg(2,4,"Привет")
-    ChatService.sendMsg(1,3,"Привет")
-    ChatService.sendMsg(4,2,"Привет")
-    ChatService.sendMsg(1,2,"Привет2")
-    ChatService.sendMsg(2,1,"Привет3")
-    //ChatService.showChat(1,2)
-
-    /*val list = ChatService.messageList?.filter { it.id == 1L }
-
-    //println(ChatService.messageList)
-    println(ChatService.chatList)
-    println(list)
-    println(ChatService.showChat(1,2))
-    */
-    println(ChatService.messageList)
-
-    ChatService.showChat(4,2)
-    println(ChatService.unreadMessages)
-    println(ChatService.getUnreadChatsCount(3))
-    //ChatService.deleteChat(1,2)
-    println(ChatService.chatList)
-    println(ChatService.messageList)
-    println(ChatService.getChats(3))
-    ChatService.getMessages(2)
-    println(ChatService.getUnreadChatsCount(2))
-
-
+    println("Домашнее задание к занятию «3.3. Лямбды, extension-функции, операторы»")
 
 }
